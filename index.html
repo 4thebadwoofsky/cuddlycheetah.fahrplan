@@ -2,29 +2,193 @@
 <html>
 
 <head>
+    <!-- Basic Page Needs
+    –––––––––––––––––––––––––––––––––––––––––––––––––– -->
+    <meta charset="utf-8">
     <title>ÖPNV Navigator Konfiguration</title>
+    <meta name="description" content="">
+    <meta name="author" content="cuddlycheetah">
+
+    <!-- Mobile Specific Metas
+    –––––––––––––––––––––––––––––––––––––––––––––––––– -->
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+
+    <!-- FONT
+    –––––––––––––––––––––––––––––––––––––––––––––––––– -->
+    <link href="//fonts.googleapis.com/css?family=Raleway:400,300,600" rel="stylesheet" type="text/css">
+
+    <!-- CSS
+    –––––––––––––––––––––––––––––––––––––––––––––––––– -->
+    <link rel="stylesheet" href="css/normalize.css">
+    <link rel="stylesheet" href="css/skeleton.css">
+    <link rel="stylesheet" href="css/auto-complete.css">
 </head>
 
 <body>
-    <p>
-        This is an example HTML forms configuration page.
-    </p>
+    <h4>ÖPNV Navigator</h4>
 
-    <input id='background_color_input' type='text' value='#000000'>
-        Background Color
-    </input>
-    <input id='foreground_color_input' type='text' value='#000000'>
-        Foreground Color
-    </input>
-    <input id='second_tick_checkbox' type='checkbox'>
-        Enable Second Ticks
-    </input>
-    <input id='animations_checkbox' type='checkbox'>
-        Show Animations
-    </input>
-    <input id='submit_button' type='button' value='Save'>
+    <form onsubmit="false">
+        <label for="autoSuggestName">Haltestellensuche:</label>
+        <input type="text" id="autoSuggestName" class="u-full-width"/>
+        <input type="hidden" id="autoSuggestStateless">
 
+        <!--
+            <div class="row">
+            <div class="six columns">
+                <label for="second_tick_checkbox">Enable Second Ticks:</label>
+                <input type="checkbox" id="second_tick_checkbox" class="u-full-width"></input>
+            </div>
+            <div class="six columns">
+                <label for="animations_checkbox">Show Animations:</label>
+                <input type="checkbox" id="animations_checkbox" class="u-full-width"></input>
+            </div>
+        </div>-->
+
+        <table class="u-full-width">
+            <thead>
+                <tr>
+                    <th>Haltestelle</th>
+                    <th>Stateless</th>
+                    <th>Aktionen</th>
+                </tr>
+            </thead>
+            <tbody id="haltestellenListe">
+                <tr>
+                    <td>Gadheim</td>
+                    <td>000000</td>
+                    <td>
+                        <button>🏠 Zuhause</button>
+                        <button class="button-primary">🏢 Arbeit</button>
+                        <button onClick="">❌ Löschen</button>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+
+        <input class="button-primary" type='button' value='Speichern'>
+    </form>
+
+    <script src="js/jquery-3.3.1.min.js"></script>
+    <script src="js/auto-complete.min.js"></script>
     <script>
+        const DEBUG = true
+        function URLToObject() {
+            var request = {}
+            var url = window.location.href
+            var pairs = url.substring(url.indexOf('?') + 1).split('&')
+            for (var i = 0; i < pairs.length; i++) {
+                if(!pairs[i])
+                    continue
+                var pair = pairs[i].split('=')
+                request[decodeURIComponent(pair[0])] = decodeURIComponent(pair[1])
+            }
+            return request
+        }
+        function getQueryParam(variable, defaultValue) {
+            var query = location.search.substring(1)
+            var vars = query.split('&')
+            for (var i = 0; i < vars.length; i++) {
+                var pair = vars[i].split('=')
+                if (pair[0] === variable)
+                    return decodeURIComponent(pair[1])
+            }
+            return defaultValue || false;
+        }
+
+        let $XHR
+        const autoSuggestBayernFahrplan = new autoComplete({
+            selector: 'input#autoSuggestName',
+            minChars: 3,
+            renderItem: function (item, search) {
+                search = search.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')
+                var re = new RegExp("(" + search.split(' ').join('|') + ")", "gi")
+                return `
+                    <div class="autocomplete-suggestion" data-name="${ item[0] }" data-stateless="${ item[1] }">
+                        ${ item[0].replace(re, "<b>$1</b>") }
+                    </div>
+                `
+            },
+            onSelect: function(e, term, item) {
+                let name = item.getAttribute('data-name')
+                let stateless = item.getAttribute('data-stateless')
+                $('input#autoSuggestName').val(name)
+                $('input#autoSuggestStateless').val(stateless)
+            },
+            source: function(term, response) {
+                try { 
+                    $XHR.abort()
+                } catch(e) {
+                }
+                $XHR = $.getJSON('https://www.bayern-fahrplan.de/autosuggest', {
+                    name_sf: term,
+                    type_sf: 'any',
+                    anyObjFilter_sf: 0,
+
+                    odvSortingMacro: 'beg',
+                    locationServerActive: 1,
+                    outputFormat: 'JSON',
+                    coordOutputFormat: 'WGS84[DD.DDDDD]',
+                }, (data) => {
+                    if (data.stopFinder) {
+                        if (data.stopFinder.points) {
+                            return response(data.stopFinder.points.map((point) => {
+                                return [
+                                    point.name,
+                                    point.stateless,
+                                ]
+                            }))
+                        }
+                    }
+                    return response(["FEHLER"])
+                })
+            }
+        })
+
+
+        const haltestellenData = {}
+        function save(data) {
+            if (DEBUG) {
+                return localStorage.setItem("data", JSON.stringify(data))
+            } else {
+                var return_to = getQueryParam('return_to', 'pebblejs://close#')
+                document.location = return_to + encodeURIComponent(JSON.stringify(data))
+            }
+        }
+        function load() {
+            if (DEBUG) {
+                return localStorage.getItem("data") ? JSON.parse(localStorage.getItem("data")) : {
+                    haltestellenData: [],
+                }
+            } else 
+                return JSON.parse(URLToObject().config)
+            //return JSON.parse(localStorage.getItem("names"));
+        }
+
+        $(document).ready(() => {
+            let haltestellenListe = $('#haltestellenListe')
+            haltestellenData = load()
+
+            for (i = 0; i < 10; i++) {
+                let row = $('<tr></tr>').data('haltestelle', i)
+
+                let row$Haltestelle = $('<td></td>').text('haltestelle ' + i)
+                let row$Stateless = $('<td></td>').text('stateless ' + i)
+                let row$Aktionen = $('<td></td>')
+
+                let aktionen$alsZuhause =$('<button></button>').text('🏠 Zuhause')
+                let aktionen$alsArbeit =$('<button></button>').text('🏢 Arbeit')
+                let aktionen$delete =$('<button></button>').text('❌ Löschen')
+
+                row$Aktionen.append(aktionen$alsZuhause).append(aktionen$alsArbeit).append(aktionen$delete)
+
+                row.append(row$Haltestelle).append(row$Stateless).append(row$Aktionen)
+
+                haltestellenListe.append(row)
+            }
+        })
+    </script>
+    <script type="text/plain">
+        // https://www.bayern-fahrplan.de/autosuggest?anyObjFilter_sf=0&odvSortingMacro=beg&coordOutputFormat=WGS84%5BDD.DDDDD%5D&locationServerActive=1&outputFormat=JSON&type_sf=any&name_sf=WÜÜRZ
         // Get a handle to the button's HTML element
         var submitButton = document.getElementById('submit_button');
 
